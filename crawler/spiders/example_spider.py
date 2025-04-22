@@ -6,5 +6,5 @@ class ExampleSpider(BaseSpider):
     name = "example"
     start_urls = ["https://httpbin.org/html"]
 
-    async def parse(self, response):
+    def parse(self, response):
         yield {"title": response.css("h1::text").get()}
