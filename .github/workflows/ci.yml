@@ -1,17 +1,39 @@
+# ---------- GitHub Actions workflow: Init CI ----------
+# Запускается при любом push в репозиторий
 name: Init CI
 
-on: [push]
+on:
+  push:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
+
+    # переменные среды, чтобы Scrapy видел настройки и путь к пакету
+    env:
+      SCRAPY_SETTINGS_MODULE: crawler.settings
+      PYTHONPATH: ${{ github.workspace }}
+
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: Smoke test
+      # 1. получаем код
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. ставим зависимости + браузер Playwright
+      - name: Install dependencies
         run: |
-          python -V
-          echo "✅ CI is alive"
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install chromium
+
+      # 3. запускаем тестовый паук
+      - name: Run example spider
+        run: |
+          scrapy crawl example -O test.json
+
+      # 4. выкладываем JSON как артефакт
+      - name: Upload test.json
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-json
+          path: test.json
