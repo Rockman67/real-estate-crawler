@@ -20,14 +20,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          python -m playwright install chromium
+          pip install scrapy-playwright            # ← гарантируем установку
+          python -m playwright install chromium    # ← браузер
 
       - name: Run example spider
         run: |
           scrapy crawl example -O test.json
 
       - name: Upload test.json
-        uses: actions/upload-artifact@v4     # ← точная версия
+        uses: actions/upload-artifact@v4
         with:
           name: test-json
           path: test.json
