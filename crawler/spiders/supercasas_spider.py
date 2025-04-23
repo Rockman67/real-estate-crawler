@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-SuperCasas spider — list + JS-rendered detail (Playwright) — Stage 2.6 fix
+SuperCasas spider — JS-detail + anti-rate-limit cleanup (Stage 2.6 final)
 """
 
 import re
@@ -15,6 +15,16 @@ from .real_estate_spider import RealEstateSpider
 class SuperCasasSpider(RealEstateSpider):
     name = "supercasas"
     base_url = "https://www.supercasas.com/buscar/"
+
+    custom_settings = {
+        # мягкий троттлинг против 429
+        "DOWNLOAD_DELAY": 3,
+        "AUTOTHROTTLE_ENABLED": True,
+        "AUTOTHROTTLE_START_DELAY": 2,
+        "AUTOTHROTTLE_MAX_DELAY": 10,
+        # playwright
+        "PLAYWRIGHT_LAUNCH_OPTIONS": {"headless": True},
+    }
 
     filter_mapping = {
         "beds": "RoomsFrom",
@@ -40,7 +50,7 @@ class SuperCasasSpider(RealEstateSpider):
             yield Request(
                 item["url"],
                 callback=self.parse_detail,
-                meta={"item": item, "playwright": True},   # ← JS-рендер обязателен
+                meta={"item": item, "playwright": True},
             )
 
     # ───────────────────────── detail page ─────────────────────────
@@ -49,30 +59,30 @@ class SuperCasasSpider(RealEstateSpider):
         html_text = response.text
 
         # helpers ---------------------------------------------------
-        def number(text: str | None):
-            if not text:
-                return None
-            m = re.search(r"\d+(?:\.\d+)?", text.replace(",", ""))
-            if not m:
-                return None
-            val = float(m.group())
-            return int(val) if val.is_integer() else val
-
-        def get_by_label(keyword: str):
-            sel = response.xpath(f"string(//label[b[contains(., '{keyword}')]])").get().strip()
+        def grab(keyword: str) -> str:
+            sel = response.xpath(
+                f"string(//label[b[contains(., '{keyword}')]])"
+            ).get(default="")
             if sel:
                 return sel
-            # fallback: regex anywhere in HTML
-            m = re.search(rf"{keyword}[^0-9]*([0-9]+(?:\.[0-9]+)?)", html_text, re.I)
-            return m.group(0) if m else ""
+            m = re.search(
+                rf"{keyword}[^0-9A-Za-zÀ-ÿ]*([^\n<]+)", html_text, re.I
+            )
+            return m.group(1) if m else ""
+
+        def clean_condition(text: str) -> str | None:
+            # удаляем HTML-теги и мусор после первой точки
+            text = re.sub(r"<.*?>", "", text)
+            text = text.split(".")[0]
+            return text.strip() or None
 
         # extract ---------------------------------------------------
         base.update(
             {
-                "beds": number(get_by_label("Habitaciones")),
-                "baths": number(get_by_label("Baños")),
-                "area_m2": number(get_by_label("Construcción")),
-                "condition": get_by_label("Condición").split(":")[-1].strip() or None,
+                "beds": self._number(grab("Habitaciones")),
+                "baths": self._number(grab("Baños")),
+                "area_m2": self._number(grab("Construcción")),
+                "condition": clean_condition(grab("Condición")),
             }
         )
 
