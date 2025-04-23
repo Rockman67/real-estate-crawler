@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-SuperCasas spider — list + detail (Stage 2.6 fixed selectors)
+SuperCasas spider — list + JS-rendered detail (Playwright) — Stage 2.6 fix
 """
 
 import re
@@ -37,28 +37,42 @@ class SuperCasasSpider(RealEstateSpider):
                 "price": self._number(li.css(".title2::text").get("")),
                 "location_raw": li.css(".type::text").get("").strip(),
             }
-            yield Request(item["url"], callback=self.parse_detail, meta={"item": item})
+            yield Request(
+                item["url"],
+                callback=self.parse_detail,
+                meta={"item": item, "playwright": True},   # ← JS-рендер обязателен
+            )
 
     # ───────────────────────── detail page ─────────────────────────
     def parse_detail(self, response):
         base = response.meta["item"]
+        html_text = response.text
 
         # helpers ---------------------------------------------------
-        def grab(keyword: str) -> str:
-            """
-            Return full text of <label><b>keyword</b>: value</label>
-            using XPath string() to get inside-tag text.
-            """
-            path = f"string(//label[b[contains(., '{keyword}')]])"
-            return response.xpath(path).get(default="").strip()
+        def number(text: str | None):
+            if not text:
+                return None
+            m = re.search(r"\d+(?:\.\d+)?", text.replace(",", ""))
+            if not m:
+                return None
+            val = float(m.group())
+            return int(val) if val.is_integer() else val
 
-        # update fields --------------------------------------------
+        def get_by_label(keyword: str):
+            sel = response.xpath(f"string(//label[b[contains(., '{keyword}')]])").get().strip()
+            if sel:
+                return sel
+            # fallback: regex anywhere in HTML
+            m = re.search(rf"{keyword}[^0-9]*([0-9]+(?:\.[0-9]+)?)", html_text, re.I)
+            return m.group(0) if m else ""
+
+        # extract ---------------------------------------------------
         base.update(
             {
-                "beds": self._number(grab("Habitaciones")),
-                "baths": self._number(grab("Baños")),
-                "area_m2": self._number(grab("Construcción")),
-                "condition": grab("Condición").split(":")[-1].strip() or None,
+                "beds": number(get_by_label("Habitaciones")),
+                "baths": number(get_by_label("Baños")),
+                "area_m2": number(get_by_label("Construcción")),
+                "condition": get_by_label("Condición").split(":")[-1].strip() or None,
             }
         )
 
@@ -71,13 +85,10 @@ class SuperCasasSpider(RealEstateSpider):
     # ───────────────────────── utils ──────────────────────────────
     @staticmethod
     def _number(text: str | None):
-        """
-        Extract first int/float from string, return as int if整数 иначе float.
-        """
         if not text:
             return None
         m = re.search(r"\d+(?:\.\d+)?", text.replace(",", "").replace(" ", ""))
         if not m:
             return None
-        num = float(m.group())
-        return int(num) if num.is_integer() else num
+        val = float(m.group())
+        return int(val) if val.is_integer() else val
